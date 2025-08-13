@@ -187,6 +187,12 @@
         .bot-avatar { background: linear-gradient(135deg, var(--saffron-primary), var(--green-primary)); }
         .user-avatar { background: linear-gradient(135deg, var(--green-primary), var(--saffron-primary)); }
 
+        .message-wrapper {
+            display: flex;
+            flex-direction: column;
+            max-width: 75%;
+        }
+
         .message-content {
             padding: 16px 20px;
             border-radius: 20px;
@@ -203,6 +209,26 @@
             color: var(--navy-primary);
         }
 
+        .speaker-btn {
+            width: 28px;
+            height: 28px;
+            border: none;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--saffron-primary), var(--green-primary));
+            color: white;
+            font-size: 0.8rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 8px;
+            align-self: flex-start;
+        }
+
+        .speaker-btn.speaking {
+            background: linear-gradient(135deg, #dc2626, #ef4444);
+        }
+
         .input-container {
             padding: 24px;
             background: rgba(255, 255, 255, 0.9);
@@ -210,6 +236,7 @@
             display: flex;
             gap: 12px;
             align-items: center;
+            position: relative;
         }
 
         #userInput {
@@ -220,17 +247,57 @@
             font-size: 1rem;
             outline: none;
         }
-
-        #sendBtn {
+        
+        #micBtn, #uploadBtn, #sendBtn {
             width: 52px;
             height: 52px;
             border: none;
             border-radius: 50%;
-            background: linear-gradient(135deg, var(--saffron-primary), var(--green-primary));
-            color: white;
             font-size: 1.4rem;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: var(--shadow-soft);
         }
+
+        #micBtn {
+             background: linear-gradient(135deg, var(--navy-primary), var(--navy-light));
+             color: white;
+        }
+        #micBtn.recording {
+            background: linear-gradient(135deg, #dc2626, #ef4444);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+        }
+
+        #uploadBtn {
+            background: linear-gradient(135deg, var(--navy-primary), var(--navy-light));
+            color: white;
+        }
+
+        #sendBtn {
+            background: linear-gradient(135deg, var(--saffron-primary), var(--green-primary));
+            color: white;
+        }
+
+        .speech-status {
+            display: none;
+            position: absolute;
+            top: -40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(30, 41, 59, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+        }
+        .speech-status.show { display: block; }
         
         .quiz-action-section {
             padding: 16px 24px; 
@@ -326,12 +393,18 @@
                 <div id="response-area">
                     <div class="message bot">
                         <div class="message-avatar bot-avatar">🤖</div>
-                        <div class="message-content">Hello! I am Azadi AI. Ask me about Independence Day or play the quiz!</div>
+                        <div class="message-wrapper">
+                            <div class="message-content">Hello! I am Azadi AI. Ask me about Independence Day or play the quiz!</div>
+                            <button class="speaker-btn" onclick="speakText(this)">🔊</button>
+                        </div>
                     </div>
                 </div>
                 <div class="input-container">
+                    <div class="speech-status" id="speechStatus">Listening...</div>
                     <input type="text" id="userInput" placeholder="Ask me something..." />
-                    <button id="sendBtn">➤</button>
+                    <button id="uploadBtn" aria-label="Upload image">🖼️</button>
+                    <button id="micBtn" aria-label="Voice input">🎤</button>
+                    <button id="sendBtn" aria-label="Send message">➤</button>
                 </div>
                 <div class="quiz-action-section">
                     <button id="quizButton">🇮🇳 Play the Independence Day Quiz!</button>
@@ -367,6 +440,84 @@
         const userInput = document.getElementById('userInput');
         const sendBtn = document.getElementById('sendBtn');
         const responseArea = document.getElementById('response-area');
+        const micBtn = document.getElementById('micBtn');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const speechStatus = document.getElementById('speechStatus');
+
+        let recognition = null;
+        let isRecording = false;
+        let currentSpeech = null;
+
+        function initSpeechRecognition() {
+            if ('webkitSpeechRecognition' in window) {
+                recognition = new webkitSpeechRecognition();
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                recognition.lang = 'en-US';
+                
+                recognition.onstart = () => {
+                    isRecording = true;
+                    micBtn.classList.add('recording');
+                    speechStatus.textContent = 'Listening...';
+                    speechStatus.classList.add('show');
+                };
+                
+                recognition.onresult = (event) => {
+                    let transcript = '';
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        transcript += event.results[i][0].transcript;
+                    }
+                    userInput.value = transcript;
+                };
+                
+                recognition.onend = () => {
+                    isRecording = false;
+                    micBtn.classList.remove('recording');
+                    speechStatus.classList.remove('show');
+                };
+                
+                recognition.onerror = (event) => {
+                    console.error('Speech recognition error:', event.error);
+                    isRecording = false;
+                    micBtn.classList.remove('recording');
+                    speechStatus.textContent = `Error: ${event.error}`;
+                };
+            } else {
+                console.warn("Speech recognition not supported.");
+            }
+        }
+
+        function toggleSpeechRecognition() {
+            if (!recognition) {
+                alert('Speech recognition is not supported in your browser.');
+                return;
+            }
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        }
+
+        function speakText(buttonElement) {
+            const textToSpeak = buttonElement.parentElement.querySelector('.message-content').textContent;
+            if (currentSpeech) {
+                speechSynthesis.cancel();
+            }
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(textToSpeak);
+                utterance.onstart = () => {
+                    currentSpeech = utterance;
+                    document.querySelectorAll('.speaker-btn').forEach(btn => btn.classList.remove('speaking'));
+                    buttonElement.classList.add('speaking');
+                };
+                utterance.onend = () => {
+                    currentSpeech = null;
+                    buttonElement.classList.remove('speaking');
+                };
+                speechSynthesis.speak(utterance);
+            }
+        }
 
         function addMessage(content, isUser = false) {
             const messageDiv = document.createElement('div');
@@ -376,12 +527,26 @@
             avatar.className = `message-avatar ${isUser ? 'user-avatar' : 'bot-avatar'}`;
             avatar.textContent = isUser ? '👤' : '🤖';
             
+            const messageWrapper = document.createElement('div');
+            messageWrapper.className = 'message-wrapper';
+
             const messageContent = document.createElement('div');
             messageContent.className = 'message-content';
             messageContent.textContent = content;
             
+            messageWrapper.appendChild(messageContent);
+
+            if (!isUser) {
+                const speakerBtn = document.createElement('button');
+                speakerBtn.className = 'speaker-btn';
+                speakerBtn.innerHTML = '🔊';
+                speakerBtn.setAttribute('aria-label', 'Read message aloud');
+                speakerBtn.onclick = () => speakText(speakerBtn);
+                messageWrapper.appendChild(speakerBtn);
+            }
+            
             messageDiv.appendChild(avatar);
-            messageDiv.appendChild(messageContent);
+            messageDiv.appendChild(messageWrapper);
             responseArea.appendChild(messageDiv);
             responseArea.scrollTop = responseArea.scrollHeight;
         }
@@ -408,6 +573,10 @@
         }
 
         sendBtn.addEventListener('click', sendMessage);
+        micBtn.addEventListener('click', toggleSpeechRecognition);
+        uploadBtn.addEventListener('click', () => {
+            alert('Image upload feature is coming soon!');
+        });
         userInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
@@ -457,14 +626,14 @@
             const currentQuestion = questions[currentQuestionIndex];
             questionTextElement.innerText = currentQuestion.question;
             questionCounterElement.innerText = `Question ${currentQuestionIndex + 1} / ${questions.length}`;
-            // Simplified answers for the grid
-            const simpleAnswers = [
-                { text: currentQuestion.answers[0].text, correct: currentQuestion.answers[0].correct },
-                { text: currentQuestion.answers[1].text, correct: currentQuestion.answers[1].correct },
-                { text: "Both of these", correct: false },
-                { text: "None of these", correct: false }
-            ];
-            simpleAnswers.forEach(answer => {
+            
+            const answerOptions = [ ...currentQuestion.answers ];
+            // Pad with some generic wrong answers if less than 4 options
+            while(answerOptions.length < 4) {
+                answerOptions.push({text: "Not this one", correct: false});
+            }
+
+            answerOptions.forEach(answer => {
                 const button = document.createElement('button');
                 button.innerText = answer.text;
                 button.classList.add('btn');
@@ -534,6 +703,11 @@
 
         quizButton.addEventListener('click', startQuiz);
         backToChatBtn.addEventListener('click', showChat);
+
+        window.onload = function() {
+            userInput.focus();
+            initSpeechRecognition();
+        };
 
     </script>
 </body>
