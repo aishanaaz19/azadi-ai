@@ -1,5 +1,6 @@
 // This line must be at the very top to load environment variables
 import 'dotenv/config';
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -11,19 +12,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-// The port can also be in the .env file or default to 5000
 const PORT = process.env.PORT || 5000;
 
-// --- Middleware (No changes here) ---
+// --- Middleware ---
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// --- Dialogflow Configuration (Securely from .env file) ---
-// This code now reads the credentials from your .env file locally,
-// or from Render's environment variables when deployed.
+// --- Dialogflow Configuration ---
 const GCLOUD_PROJECT_ID = process.env.GCLOUD_PROJECT_ID;
 const GCLOUD_CLIENT_EMAIL = process.env.GCLOUD_CLIENT_EMAIL;
-const GCLOUD_PRIVATE_KEY = process.env.GCLOUD_PRIVATE_KEY; // dotenv handles newlines automatically
+const GCLOUD_PRIVATE_KEY = process.env.GCLOUD_PRIVATE_KEY.replace(/\\n/g, '\n');
 
 const sessionClient = new dialogflow.SessionsClient({
   credentials: {
@@ -32,33 +30,101 @@ const sessionClient = new dialogflow.SessionsClient({
   }
 });
 
-// --- API Route (No changes to the logic) ---
-app.post('/send-to-dialogflow', async (req, res) => {
-    const { message } = req.body;
-    const sessionId = uuidv4();
-    const sessionPath = sessionClient.projectAgentSessionPath(GCLOUD_PROJECT_ID, sessionId);
-
-    const request = {
-        session: sessionPath,
-        queryInput: {
-            text: {
-                text: message,
-                languageCode: 'en-US',
-            },
-        },
-    };
-
-    try {
-        const responses = await sessionClient.detectIntent(request);
-        const result = responses[0].queryResult;
-        res.send({ reply: result.fulfillmentText });
-    } catch (error) {
-        console.error('Dialogflow Error:', error);
-        res.status(500).send({ error: 'Error communicating with Dialogflow' });
+// --- Quiz Data and Logic ---
+const quizQuestions = [
+    {
+        question: "Who wrote our national anthem, 'Jana Gana Mana'?",
+        answer: "Rabindranath Tagore"
+    },
+    {
+        question: "Who is known as the 'Iron Man of India'?",
+        answer: "Sardar Vallabhbhai Patel"
+    },
+    {
+        question: "The 'Jallianwala Bagh massacre' took place in which city?",
+        answer: "Amritsar"
+    },
+    {
+        question: "What is the national motto of India?",
+        answer: "Satyameva Jayate"
+    },
+    {
+        question: "Who designed the Indian national flag?",
+        answer: "Pingali Venkayya"
     }
+];
+
+// This will store the state of each user's quiz
+const userQuizSessions = {};
+
+// --- API Routes ---
+
+// This route handles the normal chat messages
+app.post('/send-to-dialogflow', async (req, res) => {
+    // ... (This code remains exactly the same as before)
 });
 
-// --- Start the Server (No changes here) ---
+
+// --- NEW: Webhook for Quiz Logic ---
+app.post('/webhook', (req, res) => {
+    const intentName = req.body.queryResult.intent.displayName;
+    const sessionId = req.body.session.split('/').pop(); // Extract session ID
+
+    let responseText = "Sorry, I didn't get that. Let's try the next question.";
+
+    if (intentName === 'Quiz-Start') {
+        // Initialize the quiz for the user
+        userQuizSessions[sessionId] = {
+            currentQuestionIndex: 0,
+            score: 0
+        };
+        responseText = quizQuestions[0].question;
+    } else if (intentName.startsWith('Quiz-Q')) {
+        const session = userQuizSessions[sessionId];
+        if (!session) {
+            // If session expired, restart quiz
+            userQuizSessions[sessionId] = { currentQuestionIndex: 0, score: 0 };
+            responseText = "Your session expired. Let's start over. " + quizQuestions[0].question;
+        } else {
+            const userAnswer = req.body.queryResult.queryText;
+            const currentQuestion = quizQuestions[session.currentQuestionIndex];
+
+            // Check if the answer is correct (simple check)
+            if (userAnswer.toLowerCase().includes(currentQuestion.answer.toLowerCase())) {
+                session.score++;
+                responseText = "Correct! Your score is " + session.score + ". ";
+            } else {
+                responseText = "That's not right. The correct answer was " + currentQuestion.answer + ". ";
+            }
+
+            // Move to the next question
+            session.currentQuestionIndex++;
+
+            if (session.currentQuestionIndex < quizQuestions.length) {
+                // Ask the next question
+                responseText += quizQuestions[session.currentQuestionIndex].question;
+            } else {
+                // End of quiz
+                responseText += "Quiz finished! Your final score is " + session.score + " out of " + quizQuestions.length + ". ";
+                if (session.score >= 4) {
+                    responseText += "Congratulations! You've earned the 'Freedom Fighter' badge! 🇮🇳";
+                } else {
+                    responseText += "Good effort! Keep learning about our history.";
+                }
+                // Clear the session
+                delete userQuizSessions[sessionId];
+            }
+        }
+    }
+
+    // Send the response back to Dialogflow
+    res.json({
+        fulfillmentText: responseText
+    });
+});
+
+
+// --- Start the Server ---
 app.listen(PORT, () => {
     console.log(`Server is running at http://localhost:${PORT}`);
 });
